@@ -66,8 +66,12 @@ runs:
 
     - name: Run gate
       shell: bash
+      env:
+        CDK_OUT: ${{ inputs.cdk-out }}
+        HARD_LIMIT: ${{ inputs.hard-limit }}
+        WARN_LIMIT: ${{ inputs.warn-limit }}
       run: >-
         cdk-lambda-size-gate
-        -cdk-out "${{ inputs.cdk-out }}"
-        -hard-limit "${{ inputs.hard-limit }}"
-        -warn-limit "${{ inputs.warn-limit }}"
+        -cdk-out "$CDK_OUT"
+        -hard-limit "$HARD_LIMIT"
+        -warn-limit "$WARN_LIMIT"
