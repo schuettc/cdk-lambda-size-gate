@@ -48,11 +48,15 @@ fails the step (non-zero exit) if any Lambda is over `hard-limit`.
 | `cdk-out` | `cdk.out` | Path to the synthesized CDK output directory |
 | `hard-limit` | `262144000` | FAIL above this many unzipped bytes (AWS's actual limit) |
 | `warn-limit` | `209715200` | WARN above this many unzipped bytes (never fails the build) |
-| `version` | *(action ref, else latest)* | Release tag of the binary to download |
+| `version` | *(action ref, else latest)* | Full release tag of the binary to download, e.g. `v1.2.3` |
 
-**`version` requires the `v` prefix** (e.g. `v1.0.0`). A bare `1.2.3` doesn't
-match a release tag, so the action silently falls back to downloading the
-latest release instead of the version you asked for.
+Pinning the action itself to a major-only tag (`@v1`) always downloads the
+binary from the *latest* release — GitHub's `v1` tag has no attached release
+assets, only full semver tags like `v1.0.0` do. Pinning `@v1.2.3` downloads
+exactly that release's binary. The `version` input follows the same rule: it
+must be a full `vX.Y.Z` tag (e.g. `v1.0.0`); anything else — a bare `1.2.3`, a
+major-only tag, a branch, or a sha — falls back to the latest release instead
+of the version you asked for.
 
 ## CLI usage
 
@@ -170,3 +174,10 @@ only ever looks at the synthesized output.
   isn't in this `cdk.out` and can't be measured directly. Those functions
   surface with the `≥` lower-bound marker described above instead of being
   silently under-counted.
+- **Non-default stack synthesizers** — this tool resolves the plain-string
+  `Code.S3Key` (`"<hash>.zip"`) that CDK's modern `DefaultStackSynthesizer`
+  writes. Templates from the legacy `AssetParameters`-based synthesizer, or a
+  custom synthesizer that emits an intrinsic (`{"Fn::Sub": ...}`, `{"Ref":
+  ...}`) `S3Key`, have unresolvable code assets and are skipped. A stack whose
+  functions are all synthesized this way reports "No zip-packaged Lambda
+  assets found".

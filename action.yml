@@ -21,7 +21,7 @@ inputs:
     required: false
     default: "209715200"
   version:
-    description: "Release tag of the binary to download (default: the tag this action was invoked at, else latest)"
+    description: "Full release tag of the binary to download, e.g. v1.2.3 (default: the full-semver ref this action was invoked at, else the latest release)"
     required: false
     default: ""
 
@@ -48,10 +48,10 @@ runs:
         esac
         version="${INPUT_VERSION:-$ACTION_REF}"
         base="https://github.com/schuettc/cdk-lambda-size-gate/releases"
-        if [[ "$version" == v* ]]; then
+        if [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
           url="$base/download/$version/cdk-lambda-size-gate_${os}_${arch}"
         else
-          # action pinned to a branch/sha, or no version given: use latest release
+          # major-only tag (v1), branch, sha, or nothing: use the latest release
           url="$base/latest/download/cdk-lambda-size-gate_${os}_${arch}"
         fi
         dest="$RUNNER_TEMP/cdk-lambda-size-gate"
