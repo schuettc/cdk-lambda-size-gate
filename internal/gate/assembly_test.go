@@ -220,3 +220,91 @@ func TestSharedAssetMeasuredOncePerFunction(t *testing.T) {
 		}
 	}
 }
+
+func TestFunctionPlusLayerOverLimitFails(t *testing.T) {
+	// AWS enforces function code + all layers combined ≤ 250 MiB. A function
+	// that passes alone must FAIL once its layer pushes the total over —
+	// the exact under-measurement the Python original had.
+	cdkOut := makeCdkOut(t, t.TempDir(), fixtureSpec{
+		Stack:      "BhLayered-dev",
+		LogicalID:  "FatFunction",
+		AssetHash:  repeat("aa11bb22", 8),
+		AssetBytes: 200 * 1024 * 1024, // fine alone
+		LayerRefs:  []string{"DepsLayer1234"},
+		Layers: map[string]layerSpec{
+			"DepsLayer1234": {AssetHash: repeat("cc33dd44", 8), AssetBytes: 100 * 1024 * 1024},
+		},
+	})
+	assets, anyFail := Evaluate(cdkOut, DefaultLimits())
+	if !anyFail {
+		t.Fatal("anyFail = false, want true (fn+layer > 250 MiB)")
+	}
+	a := assets[0]
+	if a.FunctionBytes != 200*1024*1024 || a.LayerBytes != 100*1024*1024 {
+		t.Errorf("fn=%d layer=%d", a.FunctionBytes, a.LayerBytes)
+	}
+	if a.UnmeasuredLayers != 0 {
+		t.Errorf("UnmeasuredLayers = %d, want 0", a.UnmeasuredLayers)
+	}
+}
+
+func TestArnLayerCountsAsUnmeasured(t *testing.T) {
+	// A layer referenced by bare ARN isn't staged in cdk.out — we can't weigh
+	// it. The function's total is a lower bound and must say so.
+	cdkOut := makeCdkOut(t, t.TempDir(), fixtureSpec{
+		Stack:      "BhArn-dev",
+		LogicalID:  "ArnLayerFunction",
+		AssetHash:  repeat("ee55ff66", 8),
+		AssetBytes: 1024,
+		LayerARNs:  []string{"arn:aws:lambda:us-east-1:123456789012:layer:managed:42"},
+	})
+	assets, anyFail := Evaluate(cdkOut, DefaultLimits())
+	if anyFail {
+		t.Fatal("anyFail = true, want false")
+	}
+	if assets[0].UnmeasuredLayers != 1 {
+		t.Errorf("UnmeasuredLayers = %d, want 1", assets[0].UnmeasuredLayers)
+	}
+}
+
+func TestSharedLayerAttributedToEveryFunction(t *testing.T) {
+	// A shared layer counts against EVERY function that references it.
+	dir := t.TempDir()
+	cdkOut := filepath.Join(dir, "cdk.out")
+	os.MkdirAll(cdkOut, 0o755)
+	fnHash, layerHash := repeat("11aa22bb", 8), repeat("33cc44dd", 8)
+	writeSparse(t, filepath.Join(cdkOut, "asset."+fnHash, "fn.py"), 1000)
+	writeSparse(t, filepath.Join(cdkOut, "asset."+layerHash, "layer.bin"), 7000)
+	writeJSON(t, filepath.Join(cdkOut, "BhTwo-dev.template.json"), map[string]any{
+		"Resources": map[string]any{
+			"SharedLayerX": map[string]any{"Type": "AWS::Lambda::LayerVersion",
+				"Properties": map[string]any{"Content": map[string]any{"S3Key": layerHash + ".zip"}}},
+			"FnA": map[string]any{"Type": "AWS::Lambda::Function",
+				"Properties": map[string]any{
+					"Code":   map[string]any{"S3Key": fnHash + ".zip"},
+					"Layers": []any{map[string]any{"Ref": "SharedLayerX"}}}},
+			"FnB": map[string]any{"Type": "AWS::Lambda::Function",
+				"Properties": map[string]any{
+					"Code":   map[string]any{"S3Key": fnHash + ".zip"},
+					"Layers": []any{map[string]any{"Ref": "SharedLayerX"}}}},
+		},
+	})
+	writeJSON(t, filepath.Join(cdkOut, "BhTwo-dev.assets.json"), map[string]any{
+		"files": map[string]any{
+			fnHash:    map[string]any{"source": map[string]any{"path": "asset." + fnHash, "packaging": "zip"}},
+			layerHash: map[string]any{"source": map[string]any{"path": "asset." + layerHash, "packaging": "zip"}},
+		},
+	})
+	assets, _ := Evaluate(cdkOut, DefaultLimits())
+	if len(assets) != 2 {
+		t.Fatalf("len(assets) = %d, want 2", len(assets))
+	}
+	for _, a := range assets {
+		if a.LayerBytes != 7000 {
+			t.Errorf("%s LayerBytes = %d, want 7000", a.LogicalID, a.LayerBytes)
+		}
+		if a.TotalBytes() != 8000 {
+			t.Errorf("%s TotalBytes = %d, want 8000", a.LogicalID, a.TotalBytes())
+		}
+	}
+}

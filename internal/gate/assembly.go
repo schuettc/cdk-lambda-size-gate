@@ -167,7 +167,28 @@ func Evaluate(cdkOut string, limits Limits) (assets []FunctionAsset, anyFail boo
 	return assets, anyFail
 }
 
-// sumLayers is completed in Task 5. Until then it reports nothing measured.
-func sumLayers(layers any, layerDirs map[string]string, measure func(string) int64) (int64, int) {
-	return 0, 0
+// sumLayers weighs a function's Layers list. {"Ref": <logicalID>} entries
+// resolve to same-stack LayerVersion assets and are measured; anything else
+// (bare ARN string, Fn::ImportValue, cross-stack ref) is not staged in this
+// cdk.out and counts as unmeasured — the function total is then a lower
+// bound, surfaced in the report.
+func sumLayers(layers any, layerDirs map[string]string, measure func(string) int64) (layerBytes int64, unmeasured int) {
+	list, ok := layers.([]any)
+	if !ok {
+		return 0, 0
+	}
+	for _, entry := range list {
+		ref := asString(asMap(entry)["Ref"])
+		if ref == "" {
+			unmeasured++ // ARN string or intrinsic we can't resolve
+			continue
+		}
+		dir, ok := layerDirs[ref]
+		if !ok {
+			unmeasured++ // Ref to a layer with no measurable staged asset
+			continue
+		}
+		layerBytes += measure(dir)
+	}
+	return layerBytes, unmeasured
 }
