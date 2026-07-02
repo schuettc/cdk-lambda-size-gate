@@ -1,3 +1,4 @@
 dist/
 cdk-lambda-size-gate
 *.test
+.superpowers/
