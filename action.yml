@@ -1,7 +1,5 @@
 name: "CDK Lambda Size Gate"
-description: >-
-  Fail CI before an oversized Lambda breaks your CDK deploy. Reads cdk.out and
-  gates on the AWS 250 MiB unzipped limit (function code + layers combined).
+description: "Fail CI before an oversized Lambda breaks your CDK deploy. Reads cdk.out and gates on the AWS 250 MiB unzipped limit."
 author: "Court Schuett"
 branding:
   icon: "alert-octagon"
