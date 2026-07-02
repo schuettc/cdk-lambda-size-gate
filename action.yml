@@ -1,0 +1,73 @@
+name: "CDK Lambda Size Gate"
+description: >-
+  Fail CI before an oversized Lambda breaks your CDK deploy. Reads cdk.out and
+  gates on the AWS 250 MiB unzipped limit (function code + layers combined).
+author: "Court Schuett"
+branding:
+  icon: "alert-octagon"
+  color: "orange"
+
+inputs:
+  cdk-out:
+    description: "Path to the synthesized cdk.out directory"
+    required: false
+    default: "cdk.out"
+  hard-limit:
+    description: "FAIL above this many unzipped bytes (AWS limit: 262144000)"
+    required: false
+    default: "262144000"
+  warn-limit:
+    description: "WARN above this many unzipped bytes"
+    required: false
+    default: "209715200"
+  version:
+    description: "Release tag of the binary to download (default: the tag this action was invoked at, else latest)"
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Download cdk-lambda-size-gate binary
+      shell: bash
+      env:
+        ACTION_REF: ${{ github.action_ref }}
+        INPUT_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        case "$(uname -s)" in
+          Linux)  os="linux" ;;
+          Darwin) os="darwin" ;;
+          MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+          *) echo "unsupported OS"; exit 1 ;;
+        esac
+        case "$(uname -m)" in
+          x86_64|amd64) arch="amd64" ;;
+          aarch64|arm64) arch="arm64" ;;
+          *) echo "unsupported arch"; exit 1 ;;
+        esac
+        version="${INPUT_VERSION:-$ACTION_REF}"
+        base="https://github.com/schuettc/cdk-lambda-size-gate/releases"
+        if [[ "$version" == v* ]]; then
+          url="$base/download/$version/cdk-lambda-size-gate_${os}_${arch}"
+        else
+          # action pinned to a branch/sha, or no version given: use latest release
+          url="$base/latest/download/cdk-lambda-size-gate_${os}_${arch}"
+        fi
+        dest="$RUNNER_TEMP/cdk-lambda-size-gate"
+        mkdir -p "$dest"
+        if [[ "$os" == "windows" ]]; then
+          curl -fsSL "$url.zip" -o "$dest/gate.zip"
+          unzip -o "$dest/gate.zip" -d "$dest"
+        else
+          curl -fsSL "$url.tar.gz" | tar -xz -C "$dest"
+        fi
+        echo "$dest" >> "$GITHUB_PATH"
+
+    - name: Run gate
+      shell: bash
+      run: >-
+        cdk-lambda-size-gate
+        -cdk-out "${{ inputs.cdk-out }}"
+        -hard-limit "${{ inputs.hard-limit }}"
+        -warn-limit "${{ inputs.warn-limit }}"

@@ -1,0 +1,42 @@
+name: Action self-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      # Local-action runs can't download a release binary that may not exist
+      # yet, so build and place it where the action's PATH step would.
+      - name: Build binary onto PATH
+        run: |
+          go build -o "$RUNNER_TEMP/local-gate/cdk-lambda-size-gate" .
+          echo "$RUNNER_TEMP/local-gate" >> "$GITHUB_PATH"
+      - name: Generate passing fixture
+        run: |
+          mkdir -p fixture/cdk.out/asset.ok
+          head -c 1024 /dev/zero > fixture/cdk.out/asset.ok/handler.py
+          cat > fixture/cdk.out/Stack.template.json <<'EOF'
+          {"Resources":{"Fn":{"Type":"AWS::Lambda::Function","Properties":{"Code":{"S3Key":"ok.zip"}}}}}
+          EOF
+          cat > fixture/cdk.out/Stack.assets.json <<'EOF'
+          {"files":{"ok":{"source":{"path":"asset.ok","packaging":"zip"}}}}
+          EOF
+      - name: Gate passes on small fixture
+        run: cdk-lambda-size-gate -cdk-out fixture/cdk.out
+      - name: Gate fails on oversized fixture
+        run: |
+          truncate -s 262144001 fixture/cdk.out/asset.ok/handler.py
+          set +e
+          cdk-lambda-size-gate -cdk-out fixture/cdk.out
+          [ $? -eq 1 ] || { echo "expected exit 1"; exit 1; }
